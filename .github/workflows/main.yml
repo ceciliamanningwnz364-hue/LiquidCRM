@@ -16,7 +16,7 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - name: Build App
+      - name: Build Unsigned App
         run: |
           set -e
           xcodebuild -project LiquidCRM.xcodeproj \
@@ -24,16 +24,24 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_IDENTITY="-" \
-            CODE_SIGN_STYLE=Manual
+            CODE_SIGN_IDENTITY=""
 
       - name: Package IPA
         run: |
           set -e
+          echo "=== Ищем скомпилированное приложение ==="
+          find build -name "*.app" -type d
+          
+          # Универсальный поиск .app файла в папке build
           APP_PATH=$(find build -name "LiquidCRM.app" -type d | head -n 1)
           
+          if [ -z "$APP_PATH" ]; then
+            # Если по имени не нашлось, берём первый попавшийся .app
+            APP_PATH=$(find build -name "*.app" -type d | head -n 1)
+          fi
+
           if [ -z "$APP_PATH" ]; then
             echo "Ошибка: .app файл не найден!"
             exit 1
