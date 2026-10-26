@@ -1,0 +1,640 @@
+import SwiftUI
+import UIKit
+
+@main
+struct LiquidCRMApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
+
+// MARK: - 1. МОДЕЛИ ДАННЫХ
+enum CallOutcome: String, CaseIterable, Codable {
+    case noAnswer = "Недозвон"
+    case talked = "Разговор"
+    case lead = "Лид 🔥"
+    case rejected = "Отказ"
+    
+    var icon: String {
+        switch self {
+        case .noAnswer: return "phone.down.fill"
+        case .talked: return "bubble.left.and.bubble.right.fill"
+        case .lead: return "flame.fill"
+        case .rejected: return "xmark.circle.fill"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .noAnswer: return .gray
+        case .talked: return .cyan
+        case .lead: return .green
+        case .rejected: return .red
+        }
+    }
+}
+
+struct CallRecord: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var phone: String
+    var note: String
+    var outcome: CallOutcome
+    var timestamp: Date = Date()
+}
+
+// MARK: - 2. ХРАНИЛИЩЕ И ЛОГИКА (120 FPS)
+final class CRMStore: ObservableObject {
+    @Published var coldCallGoal: Int {
+        didSet { UserDefaults.standard.set(coldCallGoal, forKey: "coldCallGoal") }
+    }
+    @Published var talkedCallGoal: Int {
+        didSet { UserDefaults.standard.set(talkedCallGoal, forKey: "talkedCallGoal") }
+    }
+    @Published var calls: [CallRecord] = [] {
+        didSet { saveCalls() }
+    }
+    
+    private let storageKey = "saved_crm_calls_v1"
+    
+    init() {
+        let savedCold = UserDefaults.standard.integer(forKey: "coldCallGoal")
+        let savedTalked = UserDefaults.standard.integer(forKey: "talkedCallGoal")
+        self.coldCallGoal = savedCold == 0 ? 120 : savedCold
+        self.talkedCallGoal = savedTalked == 0 ? 30 : savedTalked
+        loadCalls()
+    }
+    
+    var totalCallsToday: Int { calls.count }
+    var talkedCallsToday: Int { calls.filter { $0.outcome == .talked || $0.outcome == .lead }.count }
+    var leadsToday: [CallRecord] { calls.filter { $0.outcome == .lead } }
+    
+    var coldProgress: Double {
+        guard coldCallGoal > 0 else { return 0 }
+        return min(Double(totalCallsToday) / Double(coldCallGoal), 1.0)
+    }
+    
+    var talkedProgress: Double {
+        guard talkedCallGoal > 0 else { return 0 }
+        return min(Double(talkedCallsToday) / Double(talkedCallGoal), 1.0)
+    }
+    
+    func addCall(name: String, phone: String, note: String, outcome: CallOutcome) {
+        let cleanName = name.trimmingCharacters(in: .whitespaces).isEmpty ? "Звонок #\(calls.count + 1)" : name
+        let record = CallRecord(name: cleanName, phone: phone, note: note, outcome: outcome)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+            calls.insert(record, at: 0)
+        }
+        triggerHaptic(for: outcome)
+    }
+    
+    func updateCall(_ updated: CallRecord) {
+        if let idx = calls.firstIndex(where: { $0.id == updated.id }) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                calls[idx] = updated
+            }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    }
+    
+    func deleteCall(id: UUID) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            calls.removeAll { $0.id == id }
+        }
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+    }
+    
+    func resetDay() {
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+            calls.removeAll()
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+    }
+    
+    private func triggerHaptic(for outcome: CallOutcome) {
+        switch outcome {
+        case .lead: UINotificationFeedbackGenerator().notificationOccurred(.success)
+        case .talked: UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        default: UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+    }
+    
+    private func saveCalls() {
+        if let encoded = try? JSONEncoder().encode(calls) {
+            UserDefaults.standard.set(encoded, forKey: storageKey)
+        }
+    }
+    
+    private func loadCalls() {
+        if let data = UserDefaults.standard.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([CallRecord].self, from: data) {
+            self.calls = decoded
+        }
+    }
+}
+
+// MARK: - 3. LIQUID GLASS
+struct LiquidBackground: View {
+    @State private var animate = false
+    
+    var body: some View {
+        ZStack {
+            Color(red: 0.03, green: 0.03, blue: 0.07).ignoresSafeArea()
+            
+            Circle()
+                .fill(LinearGradient(colors: [.cyan.opacity(0.45), .blue.opacity(0.15)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 320, height: 320)
+                .blur(radius: 75)
+                .offset(x: animate ? -70 : 70, y: animate ? -150 : -60)
+            
+            Circle()
+                .fill(LinearGradient(colors: [.purple.opacity(0.45), .pink.opacity(0.15)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 300, height: 300)
+                .blur(radius: 80)
+                .offset(x: animate ? 80 : -60, y: animate ? 220 : 100)
+            
+            Circle()
+                .fill(Color.green.opacity(0.2))
+                .frame(width: 240, height: 240)
+                .blur(radius: 90)
+                .offset(x: animate ? -40 : 50, y: animate ? 50 : -120)
+        }
+        .ignoresSafeArea()
+        .onAppear {
+            withAnimation(.easeInOut(duration: 9).repeatForever(autoreverses: true)) {
+                animate.toggle()
+            }
+        }
+    }
+}
+
+struct GlassModifier: ViewModifier {
+    var cornerRadius: CGFloat = 24
+    
+    func body(content: Content) -> some View {
+        content
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.55), .white.opacity(0.12), .clear, .white.opacity(0.25)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.2
+                    )
+            )
+            .shadow(color: .black.opacity(0.35), radius: 16, x: 0, y: 8)
+    }
+}
+
+extension View {
+    func liquidGlass(cornerRadius: CGFloat = 24) -> some View {
+        self.modifier(GlassModifier(cornerRadius: cornerRadius))
+    }
+}
+
+// MARK: - 4. ГЛАВНЫЙ ЭКРАН
+struct ContentView: View {
+    @StateObject private var store = CRMStore()
+    @State private var selectedTab: Int = 0
+    @State private var showingAddSheet = false
+    @State private var showingGoalSheet = false
+    @State private var editingCall: CallRecord? = nil
+    @State private var searchText = ""
+    
+    var filteredCalls: [CallRecord] {
+        let base = selectedTab == 0 ? store.calls : store.leadsToday
+        if searchText.isEmpty { return base }
+        return base.filter {
+            $0.name.localizedCaseInsensitiveContains(searchText) ||
+            $0.phone.localizedCaseInsensitiveContains(searchText) ||
+            $0.note.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+    
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            LiquidBackground()
+            
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    headerBar
+                    dashboardCard
+                    quickLogStrip
+                    tabSelector
+                    searchField
+                    callsListSection
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 110)
+            }
+            
+            floatingActionBar
+        }
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showingAddSheet) {
+            AddOrEditCallSheet(store: store, existingCall: nil)
+        }
+        .sheet(item: $editingCall) { call in
+            AddOrEditCallSheet(store: store, existingCall: call)
+        }
+        .sheet(isPresented: $showingGoalSheet) {
+            GoalSettingsSheet(store: store)
+        }
+    }
+    
+    private var headerBar: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("LIQUID CRM")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .tracking(2)
+                    .foregroundStyle(.cyan)
+                Text("Твой день звонков")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            Spacer()
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showingGoalSheet = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "slider.horizontal.3")
+                    Text("Цели")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .liquidGlass(cornerRadius: 16)
+            }
+        }
+    }
+    
+    private var dashboardCard: some View {
+        HStack(spacing: 20) {
+            ZStack {
+                Circle().stroke(Color.cyan.opacity(0.15), lineWidth: 14)
+                Circle()
+                    .trim(from: 0, to: store.coldProgress)
+                    .stroke(AngularGradient(colors: [.cyan, .blue, .cyan], center: .center), style: StrokeStyle(lineWidth: 14, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                
+                Circle().stroke(Color.purple.opacity(0.15), lineWidth: 11).padding(20)
+                Circle()
+                    .trim(from: 0, to: store.talkedProgress)
+                    .stroke(AngularGradient(colors: [.purple, .pink, .purple], center: .center), style: StrokeStyle(lineWidth: 11, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .padding(20)
+                
+                VStack(spacing: 0) {
+                    Text("\(Int(store.coldProgress * 100))%")
+                        .font(.system(size: 20, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("план")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+            }
+            .frame(width: 125, height: 125)
+            
+            VStack(alignment: .leading, spacing: 12) {
+                statLine(title: "Холодные звонки", value: "\(store.totalCallsToday) / \(store.coldCallGoal)", color: .cyan, icon: "phone.fill")
+                statLine(title: "Разговорные", value: "\(store.talkedCallsToday) / \(store.talkedCallGoal)", color: .purple, icon: "waveform")
+                statLine(title: "Закрыто Лидов", value: "\(store.leadsToday.count)", color: .green, icon: "flame.fill")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .liquidGlass(cornerRadius: 28)
+    }
+    
+    private func statLine(title: String, value: String, color: Color, icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(color)
+                .frame(width: 28, height: 28)
+                .background(color.opacity(0.18))
+                .clipShape(Circle())
+            
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.65))
+                Text(value).font(.system(size: 16, weight: .bold, design: .rounded)).foregroundStyle(.white)
+            }
+        }
+    }
+    
+    private var quickLogStrip: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Быстрый учёт в 1 касание")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.75))
+            
+            HStack(spacing: 10) {
+                ForEach(CallOutcome.allCases, id: \.self) { outcome in
+                    Button {
+                        store.addCall(name: "", phone: "", note: "", outcome: outcome)
+                    } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: outcome.icon)
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(outcome.color)
+                            Text(outcome.rawValue)
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(outcome.color.opacity(0.14))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(outcome.color.opacity(0.4), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(16)
+        .liquidGlass(cornerRadius: 24)
+    }
+    
+    private var tabSelector: some View {
+        HStack(spacing: 10) {
+            tabButton(title: "Все звонки (\(store.calls.count))", index: 0)
+            tabButton(title: "Мои Лиды 🔥 (\(store.leadsToday.count))", index: 1)
+        }
+        .padding(6)
+        .liquidGlass(cornerRadius: 18)
+    }
+    
+    private func tabButton(title: String, index: Int) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selectedTab = index }
+        } label: {
+            Text(title)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(selectedTab == index ? .black : .white.opacity(0.75))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(selectedTab == index ? AnyShapeStyle(LinearGradient(colors: [.cyan, .white], startPoint: .topLeading, endPoint: .bottomTrailing)) : AnyShapeStyle(Color.clear))
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        }
+    }
+    
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.white.opacity(0.5))
+            TextField("Поиск по имени, номеру или заметке...", text: $searchText)
+                .foregroundStyle(.white)
+                .font(.system(size: 14))
+        }
+        .padding(12)
+        .liquidGlass(cornerRadius: 16)
+    }
+    
+    private var callsListSection: some View {
+        LazyVStack(spacing: 12) {
+            if filteredCalls.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: selectedTab == 1 ? "flame.circle" : "phone.badge.plus")
+                        .font(.system(size: 42))
+                        .foregroundStyle(.white.opacity(0.3))
+                    Text(selectedTab == 1 ? "Пока нет лидов. Дожимай!" : "Список звонков пуст")
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+                .liquidGlass(cornerRadius: 24)
+            } else {
+                ForEach(filteredCalls) { call in
+                    CallRowCard(call: call) { editingCall = call } onDelete: { store.deleteCall(id: call.id) }
+                }
+            }
+        }
+    }
+    
+    private var floatingActionBar: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            showingAddSheet = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "plus.circle.fill").font(.system(size: 22, weight: .bold))
+                Text("Внести звонок / Лид с заметкой").font(.system(size: 16, weight: .bold, design: .rounded))
+            }
+            .foregroundStyle(.black)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(LinearGradient(colors: [.cyan, .green.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .shadow(color: .cyan.opacity(0.45), radius: 16, x: 0, y: 6)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+        }
+    }
+}
+
+// MARK: - 5. КАРТОЧКА ЗВОНКА
+struct CallRowCard: View {
+    let call: CallRecord
+    let onTap: () -> Void
+    let onDelete: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: call.outcome.icon)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(call.outcome.color)
+                        .padding(8)
+                        .background(call.outcome.color.opacity(0.18))
+                        .clipShape(Circle())
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(call.name).font(.system(size: 16, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                        if !call.phone.isEmpty {
+                            Text(call.phone).font(.system(size: 13, weight: .medium, design: .monospaced)).foregroundStyle(.cyan)
+                        }
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(call.outcome.rawValue)
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundStyle(call.outcome.color)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(call.outcome.color.opacity(0.15))
+                            .clipShape(Capsule())
+                        Text(call.timestamp.formatted(date: .omitted, time: .shortened))
+                            .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                    }
+                }
+                if !call.note.isEmpty {
+                    Text(call.note)
+                        .font(.system(size: 13)).foregroundStyle(.white.opacity(0.85))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10).background(Color.white.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                } else {
+                    Text("Нажми, чтобы добавить заметку или номер...")
+                        .font(.system(size: 12)).italic().foregroundStyle(.white.opacity(0.35))
+                }
+            }
+            .padding(16)
+            .liquidGlass(cornerRadius: 20)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 6. РЕДАКТИРОВАНИЕ И ЗАМЕТКИ
+struct AddOrEditCallSheet: View {
+    @ObservedObject var store: CRMStore
+    var existingCall: CallRecord?
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var name: String = ""
+    @State private var phone: String = ""
+    @State private var note: String = ""
+    @State private var outcome: CallOutcome = .talked
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LiquidBackground()
+                ScrollView {
+                    VStack(spacing: 18) {
+                        HStack(spacing: 8) {
+                            ForEach(CallOutcome.allCases, id: \.self) { item in
+                                Button {
+                                    outcome = item
+                                } label: {
+                                    VStack(spacing: 6) {
+                                        Image(systemName: item.icon).font(.system(size: 18, weight: .bold))
+                                        Text(item.rawValue).font(.system(size: 11, weight: .bold))
+                                    }
+                                    .foregroundStyle(outcome == item ? .black : .white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(outcome == item ? item.color : Color.white.opacity(0.08))
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                            }
+                        }
+                        .padding(16).liquidGlass(cornerRadius: 22)
+                        
+                        VStack(spacing: 14) {
+                            TextField("Имя клиента / Компания", text: $name)
+                                .padding(14).background(Color.white.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white)
+                            TextField("Телефон", text: $phone).keyboardType(.phonePad)
+                                .padding(14).background(Color.white.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white)
+                            TextEditor(text: $note).scrollContentBackground(.hidden).frame(minHeight: 110)
+                                .padding(10).background(Color.white.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white)
+                        }
+                        .padding(16).liquidGlass(cornerRadius: 22)
+                        
+                        if let existing = existingCall {
+                            Button(role: .destructive) {
+                                store.deleteCall(id: existing.id)
+                                dismiss()
+                            } label: {
+                                Text("Удалить звонок").font(.system(size: 15, weight: .bold)).foregroundStyle(.red)
+                                    .frame(maxWidth: .infinity).padding(.vertical, 14).liquidGlass(cornerRadius: 18)
+                            }
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle(existingCall == nil ? "Новый звонок" : "Редактировать")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Сохранить") {
+                        if var existing = existingCall {
+                            existing.name = name.isEmpty ? existing.name : name
+                            existing.phone = phone
+                            existing.note = note
+                            existing.outcome = outcome
+                            store.updateCall(existing)
+                        } else {
+                            store.addCall(name: name, phone: phone, note: note, outcome: outcome)
+                        }
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear {
+                if let call = existingCall {
+                    name = call.name; phone = call.phone; note = call.note; outcome = call.outcome
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - 7. НАСТРОЙКИ ЦЕЛЕЙ
+struct GoalSettingsSheet: View {
+    @ObservedObject var store: CRMStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var coldGoalText: String = ""
+    @State private var talkedGoalText: String = ""
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LiquidBackground()
+                VStack(spacing: 20) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("План по холодным звонкам").foregroundStyle(.cyan)
+                        TextField("120", text: $coldGoalText).keyboardType(.numberPad)
+                            .padding(14).background(Color.white.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white)
+                        Text("План по разговорным звонкам").foregroundStyle(.purple)
+                        TextField("30", text: $talkedGoalText).keyboardType(.numberPad)
+                            .padding(14).background(Color.white.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white)
+                    }
+                    .padding(20).liquidGlass(cornerRadius: 24)
+                    
+                    Button(role: .destructive) {
+                        store.resetDay()
+                        dismiss()
+                    } label: {
+                        Text("Обнулить сегодняшнюю смену").font(.system(size: 15, weight: .bold)).foregroundStyle(.red)
+                            .frame(maxWidth: .infinity).padding(.vertical, 16).liquidGlass(cornerRadius: 20)
+                    }
+                    Spacer()
+                }
+                .padding(16)
+            }
+            .navigationTitle("Мои цели")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Готово") {
+                        if let c = Int(coldGoalText), c > 0 { store.coldCallGoal = c }
+                        if let t = Int(talkedGoalText), t > 0 { store.talkedCallGoal = t }
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear {
+                coldGoalText = "\(store.coldCallGoal)"
+                talkedGoalText = "\(store.talkedCallGoal)"
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
