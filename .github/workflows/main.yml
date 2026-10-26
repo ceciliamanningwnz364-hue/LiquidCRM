@@ -28,10 +28,13 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
-      - name: Package IPA
+      -       - name: Package IPA
         run: |
           mkdir -p Payload
-          cp -r build/Build/Products/Release-iphoneos/LiquidCRM.app Payload/
+          APP_PATH=$(find build -name "*.app" -maxdepth 5 | head -n 1)
+          echo "Found app at: $APP_PATH"
+          cp -r "$APP_PATH" Payload/
+          ls -la Payload
           zip -r LiquidCRM.ipa Payload
 
       - name: Upload IPA
