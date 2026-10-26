@@ -7,7 +7,6 @@ on:
 jobs:
   build:
     runs-on: macos-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,7 +27,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
-      -       - name: Package IPA
+      - name: Package IPA
         run: |
           mkdir -p Payload
           APP_PATH=$(find build -name "*.app" -maxdepth 5 | head -n 1)
