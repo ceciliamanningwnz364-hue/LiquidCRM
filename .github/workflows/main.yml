@@ -18,6 +18,7 @@ jobs:
 
       - name: Build Unsigned App
         run: |
+          set -e
           xcodebuild -project LiquidCRM.xcodeproj \
             -scheme LiquidCRM \
             -configuration Release \
@@ -29,21 +30,22 @@ jobs:
 
       - name: Package IPA
         run: |
-          echo "=== Ищем все .app файлы в проекте ==="
-          find . -name "*.app"
+          set -e
+          echo "=== Поиск собранного приложения ==="
+          find build -name "*.app"
           
-          mkdir -p Payload
-          APP_PATH=$(find . -name "LiquidCRM.app" -print -quit)
+          APP_PATH=$(find build -name "*.app" | head -n 1)
           
           if [ -z "$APP_PATH" ]; then
-            echo "Ошибка: LiquidCRM.app не найден!"
+            echo "Ошибка: .app файл не найден в папке build!"
             exit 1
           fi
           
-          echo "Найден файл приложения: $APP_PATH"
+          echo "Найден: $APP_PATH"
+          mkdir -p Payload
           cp -r "$APP_PATH" Payload/
-          ls -la Payload
           zip -r LiquidCRM.ipa Payload
+          ls -lh LiquidCRM.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
