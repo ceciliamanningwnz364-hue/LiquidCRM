@@ -29,9 +29,18 @@ jobs:
 
       - name: Package IPA
         run: |
+          echo "=== Ищем все .app файлы в проекте ==="
+          find . -name "*.app"
+          
           mkdir -p Payload
-          APP_PATH=$(find build -name "*.app" -maxdepth 5 | head -n 1)
-          echo "Found app at: $APP_PATH"
+          APP_PATH=$(find . -name "LiquidCRM.app" -print -quit)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "Ошибка: LiquidCRM.app не найден!"
+            exit 1
+          fi
+          
+          echo "Найден файл приложения: $APP_PATH"
           cp -r "$APP_PATH" Payload/
           ls -la Payload
           zip -r LiquidCRM.ipa Payload
