@@ -16,33 +16,27 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - name: Build Unsigned App
+      - name: Build Archive
         run: |
-          set -x
-          xcodebuild -project LiquidCRM.xcodeproj \
+          set -e
+          xcodebuild archive \
+            -project LiquidCRM.xcodeproj \
             -scheme LiquidCRM \
             -configuration Release \
             -sdk iphoneos \
-            -derivedDataPath build \
+            -archivePath build/LiquidCRM.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_STYLE=Manual
 
       - name: Package IPA
         run: |
           set -e
-          echo "=== Ищем скомпилированное приложение ==="
-          
-          # Точный путь, куда Xcode всегда складывает релиз для айфона
-          APP_PATH="build/Build/Products/Release-iphoneos/LiquidCRM.app"
+          APP_PATH="build/LiquidCRM.xcarchive/Products/Applications/LiquidCRM.app"
           
           if [ ! -d "$APP_PATH" ]; then
-            echo "Пробуем найти через find..."
-            APP_PATH=$(find build -name "LiquidCRM.app" -type d | head -n 1)
-          fi
-
-          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-            echo "Ошибка: .app файл физически не найден!"
+            echo "Ошибка: .app файл не найден в архиве!"
             exit 1
           fi
 
