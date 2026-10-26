@@ -18,7 +18,7 @@ jobs:
 
       - name: Build Unsigned App
         run: |
-          set -e
+          set -x
           xcodebuild -project LiquidCRM.xcodeproj \
             -scheme LiquidCRM \
             -configuration Release \
@@ -31,17 +31,22 @@ jobs:
       - name: Package IPA
         run: |
           set -e
-          echo "=== Поиск собранного приложения ==="
-          find build -name "*.app"
+          echo "=== Ищем скомпилированное приложение ==="
           
-          APP_PATH=$(find build -name "*.app" | head -n 1)
+          # Точный путь, куда Xcode всегда складывает релиз для айфона
+          APP_PATH="build/Build/Products/Release-iphoneos/LiquidCRM.app"
           
-          if [ -z "$APP_PATH" ]; then
-            echo "Ошибка: .app файл не найден в папке build!"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Пробуем найти через find..."
+            APP_PATH=$(find build -name "LiquidCRM.app" -type d | head -n 1)
+          fi
+
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "Ошибка: .app файл физически не найден!"
             exit 1
           fi
-          
-          echo "Найден: $APP_PATH"
+
+          echo "Найден файл приложения: $APP_PATH"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r LiquidCRM.ipa Payload
